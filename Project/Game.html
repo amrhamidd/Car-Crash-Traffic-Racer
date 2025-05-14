@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Car Racer - Single & Multiplayer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #222;
+            text-align: center;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            margin: 20px auto;
+            background-color: #1a1a1a;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        #gameUI {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            text-align: left;
+        }
+        .player2-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 18px;
+            text-align: right;
+        }
+        #player2Lives {
+            color: #2ecc71;
+        }
+        #startScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 10;
+        }
+        #gameModeSelection {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+        #howToPlay {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 18px;
+            cursor: pointer;
+            border-radius: 5px;
+            min-width: 200px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameUI">
+        <div>Score: <span id="score">0</span></div>
+        <div>Level: <span id="level">1</span></div>
+        <div>Speed: <span id="speed">2</span></div>
+        <div>Lives: <span id="lives">3</span></div>
+    </div>
+
+    <div class="player2-info" style="display:none;">
+        Player 2 Lives: <span id="player2Lives">3</span>
+    </div>
+
+    <canvas id="gameCanvas" width="350" height="600"></canvas>
+
+    <div id="startScreen">
+        <h1>2D Car Racer</h1>
+        <div id="gameModeSelection">
+            <h2>Select Game Mode:</h2>
+            <button id="singlePlayerBtn">Single Player</button>
+            <button id="multiPlayerBtn">Multiplayer (2 Players)</button>
+            <button id="howToPlayButton">How to Play</button>
+        </div>
+        <div id="howToPlay">
+            <h2>How to Play</h2>
+            <p><strong>Single Player:</strong> Use LEFT and RIGHT arrow keys</p>
+            <p><strong>Multiplayer:</strong> Player 1 uses ARROW KEYS, Player 2 uses A (left) and D (right)</p>
+            <p>Avoid enemy cars and collect points</p>
+            <p>Power-ups:</p>
+            <p><span style="color:#e74c3c">●</span> Extra life</p>
+            <p><span style="color:#f1c40f">●</span> Temporary invincibility</p>
+            <p><span style="color:#3498db">●</span> Slow down time</p>
+            <button id="backButton">Back to Menu</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const levelElement = document.getElementById('level');
+        const speedElement = document.getElementById('speed');
+        const livesElement = document.getElementById('lives');
+        const startScreen = document.getElementById('startScreen');
+        const singlePlayerBtn = document.getElementById('singlePlayerBtn');
+        const multiPlayerBtn = document.getElementById('multiPlayerBtn');
+        const howToPlayButton = document.getElementById('howToPlayButton');
+        const backButton = document.getElementById('backButton');
+        const player2Info = document.querySelector('.player2-info');
+
+        const GAME_STATES = {
+            MENU: 0,
+            PLAYING: 1,
+            GAME_OVER: 2,
+            HOW_TO_PLAY: 3
+        };
+
+        let gameState = GAME_STATES.MENU;
+        let gameMode = 'single'; 
+        let score = 0;
+        let level = 1;
+        let gameSpeed = 2;
+        let animationId;
+        let lastTime = 0;
+        let enemySpawnRate = 0.02;
+        let invincible = false;
+        let invincibleTimer = 0;
+        let particles = [];
+        let powerUps = [];
+        let gameTime = 0;
+        let enemyCars = [];
+        let roadMarkings = [];
+
+        const playerCar = {
+            x: canvas.width / 2 - 20,
+            y: canvas.height - 100,
+            width: 40,
+            height: 70,
+            speed: 5,
+            color: '#e74c3c',
+            lives: 3,
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                ctx.fillStyle = '#a5d8ff';
+                ctx.fillRect(this.x + 5, this.y + 5, this.width - 10, 20);
+                
+                ctx.fillStyle = '#f1c40f';
+                ctx.fillRect(this.x + 5, this.y + this.height - 10, 10, 5);
+                ctx.fillRect(this.x + this.width - 15, this.y + this.height - 10, 10, 5);
+                
+                ctx.fillStyle = '#2c3e50';
+                ctx.fillRect(this.x - 5, this.y + 15, 5, 20);
+                ctx.fillRect(this.x + this.width, this.y + 15, 5, 20);
+                ctx.fillRect(this.x - 5, this.y + this.height - 35, 5, 20);
+                ctx.fillRect(this.x + this.width, this.y + this.height - 35, 5, 20);
+                
+                if (invincible) {
+                    ctx.strokeStyle = '#f1c40f';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(this.x - 2, this.y - 2, this.width + 4, this.height + 4);
+                }
+            }
+        };
+
+        const player2 = {
+            x: canvas.width / 2 - 20,
+            y: canvas.height - 200,
+            width: 40,
+            height: 70,
+            speed: 5,
+            color: '#2ecc71',
+            lives: 3,
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                ctx.fillStyle = '#a5d8ff';
+                ctx.fillRect(this.x + 5, this.y + 5, this.width - 10, 20);
+                
+                ctx.fillStyle = '#f1c40f';
+                ctx.fillRect(this.x + 5, this.y + this.height - 10, 10, 5);
+                ctx.fillRect(this.x + this.width - 15, this.y + this.height - 10, 10, 5);
+                
+                ctx.fillStyle = '#2c3e50';
+                ctx.fillRect(this.x - 5, this.y + 15, 5, 20);
+                ctx.fillRect(this.x + this.width, this.y + 15, 5, 20);
+                ctx.fillRect(this.x - 5, this.y + this.height - 35, 5, 20);
+                ctx.fillRect(this.x + this.width, this.y + this.height - 35, 5, 20);
+            }
+        };
+
+        class EnemyCar {
+            constructor() {
+                const carTypes = [
+                    { width: 40, height: 70, color: '#3498db' },
+                    { width: 45, height: 80, color: '#2ecc71' },
+                    { width: 35, height: 60, color: '#9b59b6' }
+                ];
+                
+                const type = carTypes[Math.floor(Math.random() * carTypes.length)];
+                const lanes = [canvas.width / 4 - 20, canvas.width / 2 - 20, (3 * canvas.width) / 4 - 20];
+                
+                this.x = lanes[Math.floor(Math.random() * lanes.length)];
+                this.y = -type.height;
+                this.width = type.width;
+                this.height = type.height;
+                this.color = type.color;
+                this.speed = gameSpeed + Math.random() * 2;
+                this.damage = 0;
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                ctx.fillStyle = '#ecf0f1';
+                ctx.fillRect(this.x + 5, this.y + 5, this.width - 10, 20);
+                
+                ctx.fillStyle = '#f1c40f';
+                ctx.fillRect(this.x + 5, this.y + this.height - 10, 10, 5);
+                ctx.fillRect(this.x + this.width - 15, this.y + this.height - 10, 10, 5);
+                
+                ctx.fillStyle = '#2c3e50';
+                ctx.fillRect(this.x - 5, this.y + 15, 5, 20);
+                ctx.fillRect(this.x + this.width, this.y + 15, 5, 20);
+                ctx.fillRect(this.x - 5, this.y + this.height - 35, 5, 20);
+                ctx.fillRect(this.x + this.width, this.y + this.height - 35, 5, 20);
+                
+                if (this.damage > 0) {
+                    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                    for (let i = 0; i < this.damage; i++) {
+                        ctx.fillRect(this.x + 10 + (i * 10), this.y + 40, 8, 8);
+                    }
+                }
+            }
+            
+            update() {
+                this.y += this.speed;
+                return this.y > canvas.height;
+            }
+        }
+
+        class RoadMarking {
+            constructor(y) {
+                this.x = canvas.width / 2 - 2;
+                this.y = y;
+                this.width = 4;
+                this.height = 30;
+            }
+            
+            draw() {
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+            
+            update() {
+                this.y += gameSpeed;
+                if (this.y > canvas.height) {
+                    this.y = -this.height;
+                }
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.radius = Math.random() * 3 + 1;
+                this.vx = Math.random() * 6 - 3;
+                this.vy = Math.random() * 6 - 3;
+                this.life = 30 + Math.random() * 30;
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life--;
+                this.radius *= 0.98;
+                return this.life <= 0;
+            }
+        }
+
+        class PowerUp {
+            constructor() {
+                const types = [
+                    { type: 'life', color: '#e74c3c', size: 20 },
+                    { type: 'invincible', color: '#f1c40f', size: 25 },
+                    { type: 'slow', color: '#3498db', size: 20 }
+                ];
+                
+                const selected = types[Math.floor(Math.random() * types.length)];
+                const lanes = [canvas.width / 4 - 10, canvas.width / 2 - 10, (3 * canvas.width) / 4 - 10];
+                
+                this.x = lanes[Math.floor(Math.random() * lanes.length)];
+                this.y = -selected.size;
+                this.type = selected.type;
+                this.color = selected.color;
+                this.size = selected.size;
+                this.speed = gameSpeed * 0.8;
+                this.angle = 0;
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.translate(this.x + this.size/2, this.y + this.size/2);
+                ctx.rotate(this.angle);
+                
+                ctx.fillStyle = this.color;
+                
+                switch(this.type) {
+                    case 'life':
+                        ctx.beginPath();
+                        ctx.moveTo(0, -this.size/4);
+                        ctx.bezierCurveTo(
+                            this.size/2, -this.size/2,
+                            this.size/2, this.size/4,
+                            0, this.size/2
+                        );
+                        ctx.bezierCurveTo(
+                            -this.size/2, this.size/4,
+                            -this.size/2, -this.size/2,
+                            0, -this.size/4
+                        );
+                        ctx.fill();
+                        break;
+                        
+                    case 'invincible':
+                        ctx.beginPath();
+                        for (let i = 0; i < 5; i++) {
+                            ctx.lineTo(
+                                0 + this.size * 0.5 * Math.cos((i * 2 * Math.PI / 5) - Math.PI/2),
+                                0 + this.size * 0.5 * Math.sin((i * 2 * Math.PI / 5) - Math.PI/2)
+                            );
+                            ctx.lineTo(
+                                0 + this.size * 0.2 * Math.cos(((i + 0.5) * 2 * Math.PI / 5) - Math.PI/2),
+                                0 + this.size * 0.2 * Math.sin(((i + 0.5) * 2 * Math.PI / 5) - Math.PI/2)
+                            );
+                        }
+                        ctx.closePath();
+                        ctx.fill();
+                        break;
+                        
+                    case 'slow':
+                        ctx.beginPath();
+                        ctx.moveTo(-this.size/3, -this.size/2);
+                        ctx.lineTo(this.size/3, -this.size/2);
+                        ctx.lineTo(-this.size/3, 0);
+                        ctx.lineTo(this.size/3, 0);
+                        ctx.lineTo(-this.size/3, this.size/2);
+                        ctx.lineTo(this.size/3, this.size/2);
+                        ctx.closePath();
+                        ctx.fill();
+                        break;
+                }
+                
+                ctx.restore();
+            }
+            
+            update() {
+                this.y += this.speed;
+                this.angle += 0.05;
+                return this.y > canvas.height;
+            }
+        }
+
+        function initGame() {
+            score = 0;
+            level = 1;
+            gameSpeed = 2;
+            enemySpawnRate = 0.02;
+            playerCar.lives = 3;
+            playerCar.x = canvas.width / 2 - 20;
+            playerCar.y = canvas.height - 100;
+            
+            if (gameMode === 'multi') {
+                player2.lives = 3;
+                player2.x = canvas.width / 2 - 20;
+                player2.y = canvas.height - 200;
+                player2Info.style.display = 'block';
+            } else {
+                player2Info.style.display = 'none';
+            }
+            
+            enemyCars = [];
+            particles = [];
+            powerUps = [];
+            gameTime = 0;
+            invincible = false;
+            
+            roadMarkings = [];
+            for (let i = 0; i < 5; i++) {
+                roadMarkings.push(new RoadMarking(i * 120 - 60));
+            }
+            
+            updateUI();
+        }
+
+        const keys = {
+            ArrowLeft: false,
+            ArrowRight: false,
+            KeyA: false,
+            KeyD: false
+        };
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code in keys) {
+                keys[e.code] = true;
+                e.preventDefault();
+            }
+            
+            if (gameState === GAME_STATES.GAME_OVER && e.code === 'Space') {
+                startGame();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.code in keys) {
+                keys[e.code] = false;
+                e.preventDefault();
+            }
+        });
+
+        singlePlayerBtn.addEventListener('click', () => {
+            gameMode = 'single';
+            startGame();
+        });
+
+        multiPlayerBtn.addEventListener('click', () => {
+            gameMode = 'multi';
+            startGame();
+        });
+
+        howToPlayButton.addEventListener('click', () => {
+            document.getElementById('gameModeSelection').style.display = 'none';
+            document.getElementById('howToPlay').style.display = 'flex';
+        });
+
+        backButton.addEventListener('click', () => {
+            document.getElementById('howToPlay').style.display = 'none';
+            document.getElementById('gameModeSelection').style.display = 'flex';
+        });
+
+        function startGame() {
+            initGame();
+            gameState = GAME_STATES.PLAYING;
+            startScreen.style.display = 'none';
+            lastTime = performance.now();
+            gameLoop(lastTime);
+        }
+
+        function update(timestamp) {
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+            gameTime += deltaTime;
+            
+            if (gameState !== GAME_STATES.PLAYING) return;
+            
+            if (keys.ArrowLeft && playerCar.x > 10) {
+                playerCar.x -= playerCar.speed * (deltaTime / 16);
+            }
+            if (keys.ArrowRight && playerCar.x < canvas.width - playerCar.width - 10) {
+                playerCar.x += playerCar.speed * (deltaTime / 16);
+            }
+            
+            if (gameMode === 'multi') {
+                if (keys.KeyA && player2.x > 10) {
+                    player2.x -= player2.speed * (deltaTime / 16);
+                }
+                if (keys.KeyD && player2.x < canvas.width - player2.width - 10) {
+                    player2.x += player2.speed * (deltaTime / 16);
+                }
+            }
+            
+            for (let i = 0; i < roadMarkings.length; i++) {
+                roadMarkings[i].update();
+            }
+            
+            for (let i = enemyCars.length - 1; i >= 0; i--) {
+                if (enemyCars[i].update()) {
+                    enemyCars.splice(i, 1);
+                    score++;
+                    if (score % 5 === 0) {
+                        levelUp();
+                    }
+                    updateUI();
+                }
+            }
+            
+            for (let i = particles.length - 1; i >= 0; i--) {
+                if (particles[i].update()) {
+                    particles.splice(i, 1);
+                }
+            }
+            
+            for (let i = powerUps.length - 1; i >= 0; i--) {
+                if (powerUps[i].update()) {
+                    powerUps.splice(i, 1);
+                }
+            }
+            
+            if (Math.random() < enemySpawnRate) {
+                enemyCars.push(new EnemyCar());
+            }
+            
+            if (Math.random() < 0.005) {
+                powerUps.push(new PowerUp());
+            }
+            
+            if (invincible) {
+                invincibleTimer -= deltaTime;
+                if (invincibleTimer <= 0) {
+                    invincible = false;
+                }
+            }
+            
+            checkCollisions();
+        }
+
+        function levelUp() {
+            level++;
+            gameSpeed += 0.5;
+            enemySpawnRate += 0.005;
+            updateUI();
+            showMessage(`Level ${level}!`);
+        }
+
+        function checkCollisions() {
+            for (let i = 0; i < enemyCars.length; i++) {
+                const enemy = enemyCars[i];
+                
+                if (checkCollision(playerCar, enemy)) {
+                    if (invincible) {
+                        createParticles(enemy.x + enemy.width/2, enemy.y + enemy.height/2, enemy.color);
+                        enemyCars.splice(i, 1);
+                        score += 2;
+                        updateUI();
+                    } else {
+                        playerCar.lives--;
+                        enemy.damage++;
+                        invincible = true;
+                        invincibleTimer = 1000;
+                        
+                        createParticles(
+                            (playerCar.x + playerCar.width/2 + enemy.x + enemy.width/2) / 2,
+                            (playerCar.y + playerCar.height/2 + enemy.y + enemy.height/2) / 2,
+                            '#e74c3c'
+                        );
+                        
+                        if (playerCar.lives <= 0 && (gameMode === 'single' || player2.lives <= 0)) {
+                            gameOver();
+                        } else {
+                            showMessage('Watch out!');
+                        }
+                    }
+                    updateUI();
+                    break;
+                }
+                
+                if (gameMode === 'multi' && checkCollision(player2, enemy)) {
+                    if (invincible) {
+                        createParticles(enemy.x + enemy.width/2, enemy.y + enemy.height/2, enemy.color);
+                        enemyCars.splice(i, 1);
+                        score += 2;
+                        updateUI();
+                    } else {
+                        player2.lives--;
+                        enemy.damage++;
+                        invincible = true;
+                        invincibleTimer = 1000;
+                        
+                        createParticles(
+                            (player2.x + player2.width/2 + enemy.x + enemy.width/2) / 2,
+                            (player2.y + player2.height/2 + enemy.y + enemy.height/2) / 2,
+                            '#2ecc71'
+                        );
+                        
+                        if (playerCar.lives <= 0 && player2.lives <= 0) {
+                            gameOver();
+                        } else {
+                            showMessage('Player 2 hit!');
+                        }
+                    }
+                    updateUI();
+                    break;
+                }
+            }
+            
+            for (let i = 0; i < powerUps.length; i++) {
+                const powerUp = powerUps[i];
+                const powerUpRect = {
+                    x: powerUp.x,
+                    y: powerUp.y,
+                    width: powerUp.size,
+                    height: powerUp.size
+                };
+                
+                if (checkCollision(playerCar, powerUpRect)) {
+                    applyPowerUp(powerUp.type, 'player1');
+                    powerUps.splice(i, 1);
+                    break;
+                }
+                
+                if (gameMode === 'multi' && checkCollision(player2, powerUpRect)) {
+                    applyPowerUp(powerUp.type, 'player2');
+                    powerUps.splice(i, 1);
+                    break;
+                }
+            }
+        }
+
+        function applyPowerUp(type, player) {
+            switch(type) {
+                case 'life':
+                    if (player === 'player1') {
+                        playerCar.lives++;
+                        showMessage('Player 1 got extra life!');
+                    } else {
+                        player2.lives++;
+                        showMessage('Player 2 got extra life!');
+                    }
+                    break;
+                    
+                case 'invincible':
+                    invincible = true;
+                    invincibleTimer = 5000;
+                    showMessage(player === 'player1' ? 'Player 1 invincible!' : 'Player 2 invincible!');
+                    break;
+                    
+                case 'slow':
+                    gameSpeed = Math.max(2, gameSpeed - 1);
+                    showMessage('Slow motion!');
+                    break;
+            }
+            updateUI();
+            createParticles(
+                player === 'player1' ? 
+                    playerCar.x + playerCar.width/2 : 
+                    player2.x + player2.width/2,
+                player === 'player1' ? 
+                    playerCar.y + playerCar.height/2 : 
+                    player2.y + player2.height/2,
+                '#2ecc71'
+            );
+        }
+
+        function checkCollision(rect1, rect2) {
+            return (
+                rect1.x < rect2.x + rect2.width &&
+                rect1.x + rect1.width > rect2.x &&
+                rect1.y < rect2.y + rect2.height &&
+                rect1.y + rect1.height > rect2.y
+            );
+        }
+
+        function gameOver() {
+            gameState = GAME_STATES.GAME_OVER;
+            let message = `<h1>Game Over!</h1>
+                          <p>Final Score: ${score}</p>
+                          <p>Level Reached: ${level}</p>`;
+            
+            if (gameMode === 'multi') {
+                message += `<p>Player 1 Lives: ${playerCar.lives}</p>
+                           <p>Player 2 Lives: ${player2.lives}</p>`;
+            }
+            
+            message += `<button id="restartButton">Play Again</button>`;
+            
+            startScreen.innerHTML = message;
+            startScreen.style.display = 'flex';
+            document.getElementById('restartButton').addEventListener('click', () => {
+                document.getElementById('gameModeSelection').style.display = 'flex';
+                document.getElementById('howToPlay').style.display = 'none';
+                startScreen.style.display = 'none';
+            });
+        }
+
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 20; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function showMessage(text) {
+            const message = document.createElement('div');
+            message.textContent = text;
+            message.style.position = 'absolute';
+            message.style.left = '50%';
+            message.style.top = '50%';
+            message.style.transform = 'translate(-50%, -50%)';
+            message.style.color = '#fff';
+            message.style.fontSize = '30px';
+            message.style.textShadow = '0 0 5px #000';
+            message.style.zIndex = '100';
+            message.style.pointerEvents = 'none';
+            message.style.animation = 'fadeOut 1s forwards';
+            
+            document.body.appendChild(message);
+            
+            setTimeout(() => {
+                document.body.removeChild(message);
+            }, 1000);
+        }
+
+        function draw() {
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#777777';
+            ctx.fillRect(20, 0, canvas.width - 40, canvas.height);
+            
+            for (let i = 0; i < roadMarkings.length; i++) {
+                roadMarkings[i].draw();
+            }
+            
+            for (let i = 0; i < powerUps.length; i++) {
+                powerUps[i].draw();
+            }
+            
+            for (let i = 0; i < enemyCars.length; i++) {
+                enemyCars[i].draw();
+            }
+            
+            if (gameMode === 'multi') {
+                player2.draw();
+            }
+            
+            playerCar.draw();
+            
+            for (let i = 0; i < particles.length; i++) {
+                particles[i].draw();
+            }
+            
+            if (gameSpeed < 3) {
+                ctx.fillStyle = 'rgba(52, 152, 219, 0.2)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateUI() {
+            scoreElement.textContent = score;
+            levelElement.textContent = level;
+            speedElement.textContent = gameSpeed.toFixed(1);
+            livesElement.textContent = gameMode === 'multi' ? 
+                `${playerCar.lives} | ${player2.lives}` : 
+                playerCar.lives;
+            
+            if (gameMode === 'multi') {
+                document.getElementById('player2Lives').textContent = player2.lives;
+            }
+        }
+
+        function gameLoop(timestamp) {
+            update(timestamp);
+            draw();
+            
+            if (gameState === GAME_STATES.PLAYING) {
+                if (gameMode === 'multi' && playerCar.lives <= 0 && player2.lives <= 0) {
+                    gameOver();
+                } 
+                else if (gameMode === 'single' && playerCar.lives <= 0) {
+                    gameOver();
+                } else {
+                    animationId = requestAnimationFrame(gameLoop);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
